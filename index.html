@@ -61,6 +61,26 @@
     padding:8px 16px; border-radius:20px; background:rgba(5,6,15,.65); border:1px solid rgba(95,243,255,.25);
     font-size:14px; opacity:0; transition:opacity .6s; pointer-events:none; white-space:nowrap; max-width:94vw; text-overflow:ellipsis; overflow:hidden; }
   .toast.show { opacity:1; }
+  .orbit { font-size:13px; color:#b49bff; margin:-4px 0 10px; min-height:1em; }
+  .section { width:100%; max-width:380px; text-align:left; font-size:12px; letter-spacing:1.5px; text-transform:uppercase; opacity:.6; margin:14px 0 6px; }
+  @media (min-width:640px) { .section { max-width:680px; } }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; width:100%; max-width:380px; }
+  @media (min-width:640px) { .chips { max-width:680px; } }
+  .chip { padding:7px 11px; border-radius:16px; font-size:13px; font-family:inherit; cursor:pointer; color:var(--ink);
+    background:rgba(95,243,255,.06); border:1px solid rgba(95,243,255,.22); }
+  .chip.on { background:rgba(95,243,255,.22); border-color:var(--cyan); color:#fff; box-shadow:0 0 10px rgba(95,243,255,.35); }
+  .chip.badge { cursor:default; border-color:rgba(255,198,109,.4); background:rgba(255,198,109,.08); }
+  .jumpcard { width:100%; max-width:380px; margin:4px 0 6px; padding:12px 14px; border-radius:16px; text-align:left;
+    background:linear-gradient(120deg, rgba(169,139,255,.22), rgba(255,106,213,.16)); border:1px solid rgba(180,155,255,.6); box-shadow:0 0 18px rgba(169,139,255,.3); }
+  @media (min-width:640px) { .jumpcard { max-width:680px; } }
+  .jumpcard .n { font-weight:700; font-size:16px; color:#fff; }
+  .jumpcard .d { font-size:13px; opacity:.8; margin:3px 0 8px; }
+  .jumpcard button { padding:9px 16px; border-radius:14px; border:0; font-weight:700; font-family:inherit; font-size:14px; cursor:pointer;
+    background:linear-gradient(90deg,#b49bff,#ff6ad5); color:#120a20; }
+  .reward { cursor:pointer; }
+  .reward.sel { border-color:var(--pink); background:rgba(255,106,213,.15); box-shadow:0 0 12px rgba(255,106,213,.35); }
+  .reward.owned { opacity:.45; cursor:default; }
+  .reward .ico { font-size:22px; width:30px; text-align:center; }
 </style>
 </head>
 <body>
@@ -79,7 +99,7 @@
   <p>The orbits are full of old junk. Take your little ship out and tidy up the sky.</p>
   <button class="big" id="btnStart">Launch</button>
   <button class="ghost" id="btnHangar">Hangar</button>
-  <div class="how">Drag anywhere to fly · touching = auto-fire<br>Lift your thumb = tractor beam pulls in scrap<br>Watch for glowing dotted lines — a satellite train is coming</div>
+  <div class="how">Drag anywhere to fly · touching = auto-fire<br>Lift your thumb = tractor beam pulls in scrap<br>Glowing pink dotted line = a satellite train is coming<br>Friendly aliens can't be hurt — hover near them for a gift</div>
 </div>
 
 <div class="overlay" id="pause">
@@ -93,17 +113,34 @@
   <h2>Hangar</h2>
   <div class="summary" id="summary"></div>
   <div class="bank" id="bank">✦ 0</div>
+  <div class="orbit" id="orbitInfo"></div>
+  <div id="jumpSlot" style="width:100%;display:flex;justify-content:center"></div>
   <div class="grid" id="upgrades"></div>
+  <div class="section">Weapon pattern</div>
+  <div class="chips" id="patChips"></div>
+  <div class="section" id="looksHead">Ship</div>
+  <div class="chips" id="lookChips"></div>
+  <div class="section" id="rewHead">Orbit rewards</div>
+  <div class="chips" id="rewChips"></div>
+  <div class="section">Mode</div>
+  <div class="chips" id="modeChips"></div>
   <button class="big" id="btnLaunch">Launch Sector 1</button>
 </div>
 
+<div class="overlay" id="jump">
+  <h2>Jump to a new orbit</h2>
+  <p>Trade every upgrade and all your scrap for one permanent reward, plus a lasting +15% scrap bonus. You start again at Sector 1, but rewards stay with you forever.</p>
+  <div class="grid" id="rewardGrid" style="margin-top:10px"></div>
+  <button class="big" id="btnDoJump" disabled style="opacity:.5">Pick a reward</button>
+  <button class="ghost" id="btnNoJump">Not yet</button>
+</div>
 <script>
 (() => {
 'use strict';
 // ---------- setup ----------
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
-let W = 0, H = 0, DPR = 1;
+let SW = 0, SH = 0, W = 0, H = 0, Z = 0.72, DPR = 1; // SW/SH = screen px, W/H = world units (zoomed out)
 const $ = id => document.getElementById(id);
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -112,40 +149,79 @@ const SECTOR_TIME = 180;
 
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  W = window.innerWidth; H = window.innerHeight;
-  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  SW = window.innerWidth; SH = window.innerHeight;
+  Z = SW < 700 ? 0.72 : 0.85;
+  W = SW / Z; H = SH / Z;
+  cv.width = Math.round(SW * DPR); cv.height = Math.round(SH * DPR);
+  ctx.setTransform(DPR * Z, 0, 0, DPR * Z, 0, 0);
   buildNebula();
   if (ship) { ship.x = clamp(ship.x, 20, W - 20); ship.y = clamp(ship.y, H * 0.3, H - 40); target.x = ship.x; target.y = ship.y; }
 }
 
-// ---------- save ----------
-const SAVE_KEY = 'orbitSweeper.v1';
-const UPG = [
-  { id: 'shield',   name: 'Shield capacity', desc: 'Soak up more bumps',          max: 6, base: 30 },
-  { id: 'recharge', name: 'Shield recharge', desc: 'Shields refill faster',       max: 6, base: 25 },
-  { id: 'rate',     name: 'Fire rate',       desc: 'More lasers per second',      max: 6, base: 30 },
-  { id: 'spread',   name: 'Spread shot',     desc: 'Double, triple, quad lasers', max: 3, base: 90 },
-  { id: 'damage',   name: 'Laser power',     desc: 'Break junk in fewer hits',    max: 5, base: 45 },
-  { id: 'beam',     name: 'Tractor beam',    desc: 'Wider, stronger pull',        max: 6, base: 25 },
-  { id: 'speed',    name: 'Thrusters',       desc: 'Snappier steering',           max: 5, base: 30 },
+// ---------- data ----------
+const PATTERNS = [
+  { name: 'Single' }, { name: 'Twin' }, { name: 'Trident' }, { name: 'Wide fan' }, { name: 'Side cannons' },
+  { name: 'Fore & aft' }, { name: 'Wave' }, { name: 'Spiral sweep' }, { name: 'Homing darts' }, { name: 'Ring burst' },
+  { name: 'Prism lance', reward: true },
 ];
-let save = { scrap: 0, sector: 1, best: 0, muted: false, up: {} , seenHelp: false };
-try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = Object.assign(save, s); } catch (e) {}
-UPG.forEach(u => { if (typeof save.up[u.id] !== 'number') save.up[u.id] = 0; });
+const UPG = [
+  { id: 'shield',   name: 'Shield capacity', desc: () => 'Soak up more bumps',          max: 6, base: 30 },
+  { id: 'recharge', name: 'Shield recharge', desc: () => 'Shields refill faster',       max: 6, base: 25 },
+  { id: 'rate',     name: 'Fire rate',       desc: () => 'More lasers per second',      max: 6, base: 30 },
+  { id: 'pattern',  name: 'Weapon pattern',  desc: l => l >= 9 ? 'All 10 patterns unlocked' : 'Next: ' + PATTERNS[l + 1].name + ' (' + (l + 2) + '/10)', max: 9, base: 35, grow: 1.5 },
+  { id: 'damage',   name: 'Laser power',     desc: () => 'Break junk in fewer hits',    max: 5, base: 45 },
+  { id: 'beam',     name: 'Tractor beam',    desc: () => 'Wider, stronger pull',        max: 6, base: 25 },
+  { id: 'speed',    name: 'Thrusters',       desc: () => 'Snappier steering',           max: 5, base: 30 },
+  { id: 'drone',    name: 'Orbital drone',   desc: l => ['A little drone circles you with its own tractor beam', 'Drone shield: blocks a hit every 9s', 'A second drone joins', 'Fully crewed'][l], max: 3, base: 110, grow: 2.2 },
+];
+const REWARDS = [
+  { id: 'hull',   ico: '🛸', name: 'Bigger ship',     desc: 'Larger hull: +40 shield and a wider scoop' },
+  { id: 'gem',    ico: '💎', name: 'New gem',         desc: 'Broken junk sometimes drops sky-gems worth 8' },
+  { id: 'gold',   ico: '⭐', name: 'Star junk',       desc: 'Golden junk appears, dropping gold scrap worth 5' },
+  { id: 'wing',   ico: '✈️', name: 'Extra ship',      desc: 'A wingman flies beside you and fires too' },
+  { id: 'pet',    ico: '🐱', name: 'Pet companion',   desc: 'Comet the space cat zooms around fetching scrap' },
+  { id: 'prism',  ico: '🔆', name: 'New shooting pattern', desc: 'Prism lance: piercing triple beam (pattern 11)' },
+  { id: 'design', ico: '🛩️', name: 'Ship designs',    desc: 'Unlock the Manta and Saucer hulls' },
+  { id: 'color',  ico: '🎨', name: 'Ship colors',     desc: 'Unlock Rose, Lime, Gold and Violet paint' },
+];
+const COLORS = { cyan: ['#5ff3ff', '#ff6ad5'], rose: ['#ff7fd0', '#5ff3ff'], lime: ['#9dff8a', '#ffc66d'], gold: ['#ffd36d', '#ff6ad5'], violet: ['#b49bff', '#9dff8a'] };
+const DESIGNS = { dart: 'Dart', manta: 'Manta', saucer: 'Saucer' };
+
+// ---------- save (v1 -> v2 migration) ----------
+const SAVE_KEY = 'orbitSweeper.v1';
+let save = { v: 2, scrap: 0, sector: 1, best: 0, muted: false, up: {}, seenHelp: false, orbit: 0, rewards: [], equip: { pattern: -1, design: 'dart', color: 'cyan' }, zen: false };
+try { const s = JSON.parse(localStorage.getItem(SAVE_KEY)); if (s) save = Object.assign(save, s, { equip: Object.assign({}, save.equip, s.equip || {}) }); } catch (e) {}
+if (typeof save.up.spread === 'number') { save.up.pattern = Math.max(save.up.pattern || 0, save.up.spread); delete save.up.spread; } // v1 spread 0-3 -> patterns 0-3
+if (!Array.isArray(save.rewards)) save.rewards = [];
+UPG.forEach(u => { if (typeof save.up[u.id] !== 'number') save.up[u.id] = 0; save.up[u.id] = clamp(save.up[u.id], 0, u.max); });
+save.v = 2;
 const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) {} };
-const cost = u => Math.round(u.base * Math.pow(1.75, save.up[u.id]));
+persist();
+const has = id => save.rewards.includes(id);
+const cost = u => Math.round(u.base * Math.pow(u.grow || 1.75, save.up[u.id]));
 const lv = id => save.up[id];
+const allMaxed = () => UPG.every(u => save.up[u.id] >= u.max);
+const canJump = () => save.sector >= 9 || allMaxed();
+const scrapMult = () => (1 + 0.15 * save.orbit) * (save.zen ? 0.7 : 1);
+const activePattern = () => {
+  const e = save.equip.pattern;
+  if (e === 10 && has('prism')) return 10;
+  if (e >= 0 && e <= lv('pattern')) return e;
+  return lv('pattern');
+};
 const stats = () => ({
-  maxShield: 100 + 30 * lv('shield'),
+  hull: has('hull') ? 1.3 : 1,
+  maxShield: 100 + 30 * lv('shield') + (has('hull') ? 40 : 0),
   recharge: 7 + 4 * lv('recharge'),
   rechargeDelay: 2.2 - 0.25 * lv('recharge'),
   fireInterval: 0.2 * Math.pow(0.86, lv('rate')),
-  spread: lv('spread'),
+  pattern: activePattern(),
   damage: 1 + 0.5 * lv('damage'),
-  beamRange: 120 + 30 * lv('beam'),
+  beamRange: 120 + 30 * lv('beam') + (has('hull') ? 25 : 0),
   beamPull: 420 + 160 * lv('beam'),
   follow: 9 + 3 * lv('speed'),
+  drones: lv('drone') === 0 ? 0 : lv('drone') >= 2 ? (lv('drone') >= 3 ? 2 : 1) : 1,
+  droneShield: lv('drone') >= 2,
 });
 
 // ---------- audio ----------
@@ -187,7 +263,7 @@ const Audio = (() => {
   let pickIx = 0, pickT = 0;
   return {
     init,
-    tick() { // ambient pad
+    tick() {
       if (!ac || save.muted) return;
       while (nextChord < ac.currentTime + 0.5) {
         const ch = chords[chordIx++ % chords.length];
@@ -204,45 +280,51 @@ const Audio = (() => {
     shot() { if (!ac) return; const t = ac.currentTime; if (t - lastShot < 0.12) return; lastShot = t; tone(1200, 0.06, 'sine', 0.012, null, 0.003, 0.5); },
     pop(big) { noise(big ? 0.5 : 0.22, big ? 0.16 : 0.08, big ? 700 : 1400); tone(big ? 110 : 220, 0.3, 'sine', 0.06, null, 0.005, 0.5); },
     pick() { if (!ac) return; const t = ac.currentTime; pickIx = (t - pickT < 0.4) ? Math.min(pickIx + 1, penta.length - 1) : 0; pickT = t; tone(penta[pickIx], 0.25, 'sine', 0.05); },
+    gem() { tone(1568, 0.5, 'sine', 0.06); setTimeout(() => tone(2093, 0.6, 'sine', 0.05), 70); },
     chime() { tone(784, 1.4, 'sine', 0.08, null, 0.01); setTimeout(() => tone(1174.7, 1.6, 'sine', 0.06, null, 0.01), 180); },
     hit() { tone(140, 0.35, 'triangle', 0.12, null, 0.005, 0.6); noise(0.2, 0.06, 500); },
+    block() { tone(1046.5, 0.3, 'triangle', 0.07, null, 0.005, 1.5); },
     down() { tone(330, 1.0, 'triangle', 0.1, null, 0.01, 0.4); },
     buy() { tone(659.3, 0.2, 'sine', 0.08); setTimeout(() => tone(987.8, 0.35, 'sine', 0.07), 90); },
     friend() { tone(880, 0.3, 'sine', 0.06); setTimeout(() => tone(1318.5, 0.4, 'sine', 0.05), 120); },
-    oops() { tone(392, 0.25, 'sine', 0.06, null, 0.005, 0.7); },
+    jump() { [392, 523.3, 659.3, 784, 1046.5].forEach((f, i) => setTimeout(() => tone(f, 1.2, 'sine', 0.07, null, 0.02), i * 110)); },
     setMuted(m) { if (master) master.gain.setTargetAtTime(m ? 0 : 0.8, ac.currentTime, 0.1); },
-    get ctx() { return ac; },
   };
 })();
 
 // ---------- background ----------
 const stars = [];
-for (let i = 0; i < 160; i++) stars.push({ x: Math.random(), y: Math.random(), l: i % 3, tw: rand(0, TAU) });
+for (let i = 0; i < 220; i++) stars.push({ x: Math.random(), y: Math.random(), l: i % 3, tw: rand(0, TAU) });
 let nebula = null, nebY = 0;
 function buildNebula() {
   nebula = document.createElement('canvas');
-  nebula.width = Math.max(1, Math.round(W)); nebula.height = Math.max(1, Math.round(H));
+  nebula.width = Math.max(1, Math.round(SW)); nebula.height = Math.max(1, Math.round(SH));
   const n = nebula.getContext('2d');
   const blobs = [['rgba(169,139,255,0.10)', 0.2, 0.25, 0.6], ['rgba(255,106,213,0.07)', 0.85, 0.55, 0.5], ['rgba(95,243,255,0.06)', 0.4, 0.85, 0.55]];
   blobs.forEach(([c, x, y, r]) => {
-    const g = n.createRadialGradient(x * W, y * H, 0, x * W, y * H, r * Math.max(W, H));
-    g.addColorStop(0, c); g.addColorStop(1, 'rgba(0,0,0,0)'); n.fillStyle = g; n.fillRect(0, 0, W, H);
+    const g = n.createRadialGradient(x * SW, y * SH, 0, x * SW, y * SH, r * Math.max(SW, SH));
+    g.addColorStop(0, c); g.addColorStop(1, 'rgba(0,0,0,0)'); n.fillStyle = g; n.fillRect(0, 0, SW, SH);
   });
 }
 
 // ---------- game state ----------
-let state = 'title'; // title | play | paused | hangar
+let state = 'title'; // title | play | paused | hangar | jump
 let ship = null, target = { x: 0, y: 0 };
 let junk = [], bullets = [], pickups = [], parts = [], sats = [], trains = [], critters = [], texts = [];
+let drones = [], wing = null, pet = null;
 let run = null, S = stats();
-const pointer = { down: false, id: null, sx: 0, sy: 0, tx: 0, ty: 0, moved: 0, t0: 0 };
+const pointer = { down: false, id: null, sx: 0, sy: 0, tx: 0, ty: 0 };
 
 function newRun() {
   S = stats();
-  ship = { x: W / 2, y: H * 0.78, vx: 0, shield: S.maxShield, hitT: 0, inv: 1.5, fireT: 0, reboot: 0, bank: 0, tilt: 0 };
+  ship = { x: W / 2, y: H * 0.78, shield: S.maxShield, hitT: 0, inv: 1.5, fireT: 0, reboot: 0, tilt: 0, shotN: 0, t: 0 };
   target.x = ship.x; target.y = ship.y;
   junk = []; bullets = []; pickups = []; parts = []; sats = []; trains = []; critters = []; texts = [];
-  run = { t: 0, scrap: 0, cleared: 0, spawnJ: 0.5, nextTrain: 18, nextFriend: rand(10, 20), nextPest: 35, ending: 0, downs: 0, sector: save.sector };
+  drones = []; for (let i = 0; i < S.drones; i++) drones.push({ a: i * Math.PI, x: ship.x, y: ship.y, shieldT: 0 });
+  wing = has('wing') ? { x: ship.x - 40, y: ship.y + 16, fireT: 0 } : null;
+  pet = has('pet') ? { x: ship.x + 30, y: ship.y, vx: 0, vy: 0, ph: 0 } : null;
+  run = { t: 0, scrap: 0, cleared: 0, spawnJ: 0.5, nextTrain: 18, nextFriend: rand(8, 16), nextPest: 35, ending: 0, downs: 0,
+    sector: save.sector, zen: save.zen, boss: save.sector >= 3 ? 140 : 9999 };
 }
 
 // ---------- entities ----------
@@ -254,6 +336,7 @@ const JUNK_TYPES = [
   { k: 'scope',   r: [18, 22], hp: 4, col: '#ff6ad5', scrap: 6, w: 1.2 },
   { k: 'station', r: [28, 34], hp: 7, col: '#7fb8ff', scrap: 8, w: 1 },
 ];
+const HULK = { k: 'hulk', r: [64, 64], hp: 1, col: '#ffb38a', scrap: 0, w: 0 };
 function pickType() {
   const tot = JUNK_TYPES.reduce((a, t) => a + t.w, 0); let r = Math.random() * tot;
   for (const t of JUNK_TYPES) { if ((r -= t.w) < 0) return t; } return JUNK_TYPES[0];
@@ -262,14 +345,20 @@ function spawnJunk(type, x, y, r, vx, vy) {
   const t = type || pickType();
   const rr = r || rand(t.r[0], t.r[1]);
   const j = { t, k: t.k, x: x ?? rand(rr, W - rr), y: y ?? -rr - 10, r: rr, hp: t.hp * (rr / ((t.r[0] + t.r[1]) / 2)) * (1 + (run.sector - 1) * 0.08),
-    vx: vx ?? rand(-18, 18), vy: vy ?? rand(45, 85) * (1 + Math.min(run.sector - 1, 6) * 0.04), a: rand(0, TAU), spin: rand(-0.8, 0.8), flash: 0, verts: null };
+    vx: vx ?? rand(-18, 18), vy: vy ?? rand(45, 85) * (1 + Math.min(run.sector - 1, 6) * 0.04), a: rand(0, TAU), spin: rand(-0.8, 0.8), flash: 0, verts: null,
+    gold: !type && has('gold') && Math.random() < 0.09 };
   j.maxHp = j.hp;
   if (t.k === 'rock') { j.verts = []; const n = 9 + (Math.random() * 4 | 0); for (let i = 0; i < n; i++) j.verts.push(rand(0.72, 1.05)); }
   junk.push(j); return j;
 }
-function addPickup(x, y, v, burst = 60) {
+function spawnBoss() {
+  const j = spawnJunk(HULK, W / 2, -80, 64, rand(-10, 10), 22);
+  j.boss = true; j.spin = 0.12; j.hp = j.maxHp = 150 + 120 * (run.sector - 3);
+  toast('A huge derelict hulk is drifting in…', 3000); Audio.chime();
+}
+function addPickup(x, y, v, burst = 60, kind) {
   const a = rand(0, TAU), s = rand(10, burst);
-  pickups.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s + 20, v, life: 22, ph: rand(0, TAU) });
+  pickups.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s + 20, v, life: 22, ph: rand(0, TAU), kind });
 }
 function sparks(x, y, col, n, sp = 140, life = 0.7) {
   for (let i = 0; i < n; i++) { const a = rand(0, TAU), s = rand(sp * 0.2, sp); parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(life * 0.5, life), max: life, col, sz: rand(1, 2.6) }); }
@@ -279,10 +368,18 @@ function toast(msg, ms = 3200) { const el = $('toast'); el.textContent = msg; el
 
 function destroyJunk(j, i) {
   junk.splice(i, 1); run.cleared++;
-  const big = j.r > 26; sparks(j.x, j.y, j.t.col, big ? 26 : 14, big ? 200 : 150); Audio.pop(big);
+  if (j.boss) {
+    sparks(j.x, j.y, '#ffb38a', 70, 320, 1.4); Audio.pop(true); setTimeout(() => Audio.pop(true), 160);
+    for (let k = 0; k < 36; k++) addPickup(j.x + rand(-30, 30), j.y + rand(-20, 20), 2, 200);
+    for (let k = 0; k < 4; k++) spawnJunk(JUNK_TYPES[5], j.x + rand(-40, 40), j.y, 22, rand(-70, 70), rand(40, 80));
+    floatText(j.x, j.y, 'Hulk scrapped!', '#ffb38a'); return;
+  }
+  const big = j.r > 26; sparks(j.x, j.y, j.gold ? '#ffd36d' : j.t.col, big ? 26 : 14, big ? 200 : 150); Audio.pop(big);
   const n = Math.max(1, Math.round(j.t.scrap * (j.r / 24)));
-  for (let k = 0; k < n; k++) addPickup(j.x, j.y, 1);
-  if ((j.k === 'station' || j.k === 'rock') && j.r > 24) { // break into chunks
+  if (j.gold) for (let k = 0; k < Math.ceil(n / 2); k++) addPickup(j.x, j.y, 5, 60, 'gold');
+  else for (let k = 0; k < n; k++) addPickup(j.x, j.y, 1);
+  if (has('gem') && Math.random() < 0.12) addPickup(j.x, j.y, 8, 40, 'gem');
+  if ((j.k === 'station' || j.k === 'rock') && j.r > 24) {
     const childType = j.k === 'station' ? JUNK_TYPES[2] : JUNK_TYPES[0];
     for (let k = 0; k < 2; k++) spawnJunk(childType, j.x + (k ? 10 : -10), j.y, j.r * 0.55, (k ? 1 : -1) * rand(30, 60), j.vy * 0.8);
   }
@@ -298,14 +395,15 @@ function spawnTrain() {
 }
 function spawnCritter(kind) {
   const x = rand(30, W - 30);
-  if (kind === 'friend') critters.push({ kind, x, y: -30, vx: 0, vy: rand(22, 32), ph: rand(0, TAU), r: 16, shy: 0, gifted: false, col: Math.random() < 0.5 ? '#ff9be6' : '#8ff7ff' });
+  if (kind === 'friend') critters.push({ kind, x, y: -30, vy: rand(22, 32), ph: rand(0, TAU), r: 16, gifted: false, col: Math.random() < 0.5 ? '#ff9be6' : '#8ff7ff' });
   else critters.push({ kind, x, y: -20, vx: 0, vy: 50, ph: rand(0, TAU), r: 11, hp: 2 + run.sector * 0.3, ate: 0, flash: 0 });
 }
 
 function damageShip(d) {
-  if (ship.inv > 0 || ship.reboot > 0) return;
+  if (ship.inv > 0 || ship.reboot > 0 || run.zen) return;
+  if (S.droneShield) { const dr = drones.find(q => q.shieldT <= 0); if (dr) { dr.shieldT = 9; ship.inv = 0.6; Audio.block(); sparks(dr.x, dr.y, '#9dff8a', 14, 140); floatText(ship.x, ship.y - 30, 'blocked!', '#9dff8a'); return; } }
   ship.shield -= d; ship.hitT = S.rechargeDelay; ship.inv = 0.8; Audio.hit();
-  sparks(ship.x, ship.y, '#5ff3ff', 12, 160);
+  sparks(ship.x, ship.y, (COLORS[save.equip.color] || COLORS.cyan)[0], 12, 160);
   if (ship.shield <= 0) shieldsDown();
 }
 function shieldsDown() {
@@ -320,13 +418,48 @@ function shieldsDown() {
   sparks(ship.x, ship.y, '#ffc66d', 30, 220, 1);
 }
 
+// ---------- weapons ----------
+const V = 720;
+function bullet(x, y, ang, dmg, o) { bullets.push(Object.assign({ x, y, vx: Math.sin(ang) * V, vy: -Math.cos(ang) * V, dmg, t: 0, pierce: 0, hits: null }, o)); }
+function fire() {
+  const x = ship.x, y = ship.y - 18 * S.hull, n = ship.shotN++, D = S.damage;
+  switch (S.pattern) {
+    case 0: bullet(x, y, 0, D); break;
+    case 1: bullet(x - 6, y, 0, D * 0.62); bullet(x + 6, y, 0, D * 0.62); break;
+    case 2: [-0.12, 0, 0.12].forEach(a => bullet(x, y, a, D * 0.48)); break;
+    case 3: [-0.36, -0.18, 0, 0.18, 0.36].forEach(a => bullet(x, y, a, D * 0.33)); break;
+    case 4: bullet(x - 6, y, 0, D * 0.5); bullet(x + 6, y, 0, D * 0.5); bullet(x - 12, y + 10, -0.7, D * 0.4); bullet(x + 12, y + 10, 0.7, D * 0.4); break;
+    case 5: [-0.12, 0, 0.12].forEach(a => bullet(x, y, a, D * 0.45)); bullet(x - 6, y + 30, Math.PI + 0.25, D * 0.45); bullet(x + 6, y + 30, Math.PI - 0.25, D * 0.45); break;
+    case 6: bullet(x, y, 0, D * 0.4); bullet(x, y, 0, D * 0.95, { kind: 'wave', bx: x, ph: 0 }); bullet(x, y, 0, D * 0.95, { kind: 'wave', bx: x, ph: Math.PI }); break;
+    case 7: { const a = Math.sin(n * 0.35) * 0.9; bullet(x, y, 0, D * 0.6); bullet(x, y, a, D * 0.8); bullet(x, y, -a, D * 0.8); break; }
+    case 8: [-0.6, 0, 0.6].forEach(a => bullet(x, y, a, D * 0.85, { kind: 'home', vx: Math.sin(a) * 480, vy: -Math.cos(a) * 480 })); break;
+    case 9: bullet(x - 6, y, 0, D * 0.7); bullet(x + 6, y, 0, D * 0.7);
+      if (n % 6 === 0) for (let i = 0; i < 14; i++) bullet(ship.x, ship.y, i / 14 * TAU, D * 0.6, { vx: Math.sin(i / 14 * TAU) * 420, vy: -Math.cos(i / 14 * TAU) * 420 }); break;
+    case 10: [-0.05, 0, 0.05].forEach(a => bullet(x, y, a, D * 0.9, { kind: 'lance', pierce: 3, hits: [] })); break;
+  }
+  if (wing && (n % 2 === 0)) bullet(wing.x, wing.y - 10, 0, D * 0.6, { kind: 'wing' });
+  Audio.shot();
+}
+function nearestTarget(x, y) {
+  let best = null, bd = 1e9;
+  for (const j of junk) { if (j.y > y + 40) continue; const d = (j.x - x) ** 2 + (j.y - y) ** 2; if (d < bd) { bd = d; best = j; } }
+  for (const c of critters) { if (c.kind !== 'pest') continue; const d = (c.x - x) ** 2 + (c.y - y) ** 2; if (d < bd) { bd = d; best = c; } }
+  return best;
+}
+
+function collect(i, x, y) {
+  const q = pickups[i]; run.scrap += q.v; pickups.splice(i, 1);
+  q.kind === 'gem' || q.kind === 'gold' ? Audio.gem() : Audio.pick();
+  sparks(x ?? q.x, y ?? q.y, q.kind === 'gem' ? '#7fd8ff' : '#ffc66d', 3, 60, 0.3);
+}
+
 // ---------- update ----------
 function update(dt) {
-  run.t += dt;
+  run.t += dt; ship.t += dt;
   const p = Math.min(run.t / SECTOR_TIME, 1);
   const spawning = run.t < SECTOR_TIME - 4;
+  const density = clamp(W / 420, 1, 2.2);
 
-  // ship movement (relative drag)
   const k = Math.min(1, dt * S.follow);
   const ox = ship.x;
   ship.x += (target.x - ship.x) * k; ship.y += (target.y - ship.y) * k;
@@ -338,78 +471,101 @@ function update(dt) {
 
   const firing = pointer.down && ship.reboot <= 0 && run.ending <= 0;
   const beam = !pointer.down || run.ending > 0;
-  // fire
   ship.fireT -= dt;
-  if (firing && ship.fireT <= 0) {
-    ship.fireT = S.fireInterval;
-    const pattern = [[0], [-6, 6], [-0.13, 0, 0.13], [-0.2, -0.07, 0.07, 0.2]][S.spread];
-    pattern.forEach(v => {
-      if (S.spread === 1) bullets.push({ x: ship.x + v, y: ship.y - 18, vx: 0, vy: -720 });
-      else bullets.push({ x: ship.x, y: ship.y - 18, vx: Math.sin(v) * 720, vy: -Math.cos(v) * 720 });
-    });
-    Audio.shot();
+  if (firing && ship.fireT <= 0) { ship.fireT = S.fireInterval; fire(); }
+
+  // helpers
+  drones.forEach((d, i) => { d.a += dt * 1.7; const R = 50 * S.hull; d.x = ship.x + Math.cos(d.a) * R; d.y = ship.y + Math.sin(d.a) * R * 0.8; if (d.shieldT > 0) d.shieldT -= dt; });
+  if (wing) { wing.x += (ship.x - 42 * S.hull - wing.x) * Math.min(1, dt * 6); wing.y += (ship.y + 18 - wing.y) * Math.min(1, dt * 6); }
+  if (pet) {
+    pet.ph += dt;
+    let best = null, bd = 300 * 300;
+    for (const q of pickups) { const d = (q.x - pet.x) ** 2 + (q.y - pet.y) ** 2; if (d < bd) { bd = d; best = q; } }
+    const tx = best ? best.x : ship.x + 38 + Math.sin(pet.ph) * 12, ty = best ? best.y : ship.y - 10 + Math.cos(pet.ph * 1.3) * 10;
+    const dx = tx - pet.x, dy = ty - pet.y, d = Math.hypot(dx, dy) || 1, sp = best ? 300 : Math.min(260, d * 4);
+    pet.vx += (dx / d * sp - pet.vx) * Math.min(1, dt * 5); pet.vy += (dy / d * sp - pet.vy) * Math.min(1, dt * 5);
+    pet.x += pet.vx * dt; pet.y += pet.vy * dt;
   }
 
   // spawns
   if (spawning) {
     run.spawnJ -= dt;
-    if (run.spawnJ <= 0) { spawnJunk(); run.spawnJ = rand(0.7, 1.3) * (1.15 - 0.5 * p) / (1 + Math.min(run.sector - 1, 6) * 0.05); }
-    if (run.t > run.nextTrain) { spawnTrain(); run.nextTrain = run.t + rand(13, 20) - Math.min(run.sector, 4); }
-    if (run.t > run.nextFriend) { spawnCritter('friend'); run.nextFriend = run.t + rand(22, 35); }
-    if (run.t > run.nextPest) { spawnCritter('pest'); if (p > 0.5 && Math.random() < 0.5) spawnCritter('pest'); run.nextPest = run.t + rand(10, 16); }
+    if (run.spawnJ <= 0) { spawnJunk(); run.spawnJ = rand(0.7, 1.3) * (1.15 - 0.5 * p) / (1 + Math.min(run.sector - 1, 6) * 0.05) / density; }
+    if (!run.zen && run.t > run.nextTrain) { spawnTrain(); run.nextTrain = run.t + rand(13, 20) - Math.min(run.sector, 4); }
+    if (run.t > run.nextFriend) { spawnCritter('friend'); run.nextFriend = run.t + rand(18, 30); }
+    if (!run.zen && run.t > run.nextPest) { spawnCritter('pest'); if (p > 0.5 && Math.random() < 0.5) spawnCritter('pest'); run.nextPest = run.t + rand(10, 16); }
+    if (run.t > run.boss) { run.boss = 9999; spawnBoss(); }
   }
 
-  // bullets
+  // bullets (friendly aliens are immune: bullets only test junk and pests)
   for (let i = bullets.length - 1; i >= 0; i--) {
-    const b = bullets[i]; b.x += b.vx * dt; b.y += b.vy * dt;
-    if (b.y < -20 || b.x < -20 || b.x > W + 20) { bullets.splice(i, 1); continue; }
-    let hit = false;
+    const b = bullets[i]; b.t += dt;
+    if (b.kind === 'wave') { b.bx += b.vx * dt; b.y += b.vy * dt; b.x = b.bx + Math.sin(b.t * 11 + b.ph) * 38; }
+    else {
+      if (b.kind === 'home') {
+        const tg = nearestTarget(b.x, b.y);
+        if (tg) { const want = Math.atan2(tg.y - b.y, tg.x - b.x), cur = Math.atan2(b.vy, b.vx); let da = want - cur; da = Math.atan2(Math.sin(da), Math.cos(da)); const na = cur + clamp(da, -5 * dt, 5 * dt); b.vx = Math.cos(na) * 480; b.vy = Math.sin(na) * 480; }
+      }
+      b.x += b.vx * dt; b.y += b.vy * dt;
+    }
+    if (b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30 || b.t > 3) { bullets.splice(i, 1); continue; }
+    let gone = false;
     for (let j = junk.length - 1; j >= 0; j--) {
       const o = junk[j];
+      if (b.hits && b.hits.includes(o)) continue;
       if ((b.x - o.x) ** 2 + (b.y - o.y) ** 2 < o.r * o.r) {
-        o.hp -= S.damage; o.flash = 0.08; hit = true; sparks(b.x, b.y, o.t.col, 3, 90, 0.35);
+        o.hp -= b.dmg; o.flash = 0.08; sparks(b.x, b.y, o.t.col, 3, 90, 0.35);
         if (o.hp <= 0) destroyJunk(o, j);
+        if (b.pierce > 0) { b.pierce--; b.hits.push(o); } else gone = true;
         break;
       }
     }
-    if (!hit) for (let j = critters.length - 1; j >= 0; j--) {
+    if (!gone) for (let j = critters.length - 1; j >= 0; j--) {
       const c = critters[j];
+      if (c.kind !== 'pest' || (b.hits && b.hits.includes(c))) continue;
       if ((b.x - c.x) ** 2 + (b.y - c.y) ** 2 < (c.r + 3) ** 2) {
-        hit = true;
-        if (c.kind === 'friend') {
-          if (c.shy <= 0) { const lose = Math.min(run.scrap, 3); run.scrap -= lose; floatText(c.x, c.y - 20, lose ? 'ouch! −' + lose : 'ouch!', '#ff9be6'); Audio.oops(); c.shy = 3; c.vx = (c.x < W / 2 ? -1 : 1) * 70;
-            if (!save.seenFriend) { save.seenFriend = true; persist(); toast('Friendly space life! Don\'t zap them — lift your thumb near one instead.', 4500); } }
-        } else {
-          c.hp -= S.damage; c.flash = 0.1;
-          if (c.hp <= 0) { critters.splice(j, 1); run.cleared++; sparks(c.x, c.y, '#9dff8a', 16, 160); Audio.pop(false); for (let q = 0; q < 3 + c.ate; q++) addPickup(c.x, c.y, 1); }
-        }
+        c.hp -= b.dmg; c.flash = 0.1;
+        if (c.hp <= 0) { critters.splice(j, 1); run.cleared++; sparks(c.x, c.y, '#9dff8a', 16, 160); Audio.pop(false); for (let q = 0; q < 3 + c.ate; q++) addPickup(c.x, c.y, 1); }
+        if (b.pierce > 0) { b.pierce--; b.hits.push(c); } else gone = true;
         break;
       }
     }
-    if (hit) bullets.splice(i, 1);
+    if (gone) bullets.splice(i, 1);
   }
 
   // junk
+  const shipR = 13 * S.hull;
   for (let i = junk.length - 1; i >= 0; i--) {
-    const j = junk[i]; j.x += j.vx * dt; j.y += j.vy * dt; j.a += j.spin * dt; if (j.flash > 0) j.flash -= dt;
-    if (j.x < j.r && j.vx < 0 || j.x > W - j.r && j.vx > 0) j.vx *= -1;
+    const j = junk[i]; j.a += j.spin * dt; if (j.flash > 0) j.flash -= dt;
+    if (j.boss) { if (j.y < H * 0.2 && run.ending <= 0) j.y += j.vy * dt; else { j.x += Math.sin(run.t * 0.4) * 30 * dt; if (run.ending > 0) j.y -= 40 * dt; } if (j.y < -200) { junk.splice(i, 1); continue; } }
+    else { j.x += j.vx * dt; j.y += j.vy * dt; if (j.x < j.r && j.vx < 0 || j.x > W - j.r && j.vx > 0) j.vx *= -1; }
     if (j.y > H + j.r + 20) { junk.splice(i, 1); continue; }
-    if ((j.x - ship.x) ** 2 + (j.y - ship.y) ** 2 < (j.r + 12) ** 2) {
-      if (ship.inv <= 0 && ship.reboot <= 0) { damageShip(10 + j.r * 0.5); destroyJunk(j, i); }
+    if ((j.x - ship.x) ** 2 + (j.y - ship.y) ** 2 < (j.r * 0.85 + shipR) ** 2) {
+      if (j.boss) damageShip(20);
+      else if (ship.inv <= 0 && ship.reboot <= 0 && !run.zen) { damageShip(10 + j.r * 0.5); destroyJunk(j, i); }
     }
   }
 
   // pickups
+  const scoop = 20 * S.hull;
   for (let i = pickups.length - 1; i >= 0; i--) {
     const q = pickups[i]; q.ph += dt * 4; q.life -= dt;
     const dx = ship.x - q.x, dy = ship.y - q.y, d = Math.hypot(dx, dy) || 1;
     const range = run.ending > 0 ? 9999 : beam ? S.beamRange : 36;
+    let pulled = false;
     if (d < range && ship.reboot <= 0) {
       const pull = (run.ending > 0 ? 1400 : beam ? S.beamPull : 300) * (1.2 - Math.min(d / range, 1) * 0.6);
-      q.vx += dx / d * pull * dt; q.vy += dy / d * pull * dt; q.vx *= 0.94; q.vy *= 0.94; q.pulled = true;
-    } else { q.vx *= 0.98; q.vy += (40 - q.vy) * dt * 0.8; q.pulled = false; }
+      q.vx += dx / d * pull * dt; q.vy += dy / d * pull * dt; pulled = true;
+    } else for (const dr of drones) {
+      const ex = dr.x - q.x, ey = dr.y - q.y, e = Math.hypot(ex, ey) || 1;
+      if (e < 80) { q.vx += ex / e * 520 * dt; q.vy += ey / e * 520 * dt; pulled = true; if (e < 14) { collect(i, dr.x, dr.y); pulled = 'got'; } break; }
+    }
+    if (pulled === 'got') continue;
+    if (pulled) { q.vx *= 0.94; q.vy *= 0.94; } else { q.vx *= 0.98; q.vy += (40 - q.vy) * dt * 0.8; }
+    q.pulled = pulled;
     q.x += q.vx * dt; q.y += q.vy * dt;
-    if (d < 20 && ship.reboot <= 0) { run.scrap += q.v; pickups.splice(i, 1); Audio.pick(); sparks(q.x, q.y, '#ffc66d', 3, 60, 0.3); continue; }
+    if (d < scoop && ship.reboot <= 0) { collect(i); continue; }
+    if (pet && (q.x - pet.x) ** 2 + (q.y - pet.y) ** 2 < 16 * 16) { collect(i); continue; }
     if (q.y > H + 30 || q.life <= 0) pickups.splice(i, 1);
   }
 
@@ -424,19 +580,18 @@ function update(dt) {
   for (let i = sats.length - 1; i >= 0; i--) {
     const s = sats[i]; s.x += s.vx * dt; s.y += s.vy * dt; s.d += Math.hypot(s.vx, s.vy) * dt; s.blink += dt;
     if (s.d > s.len) { sats.splice(i, 1); continue; }
-    if ((s.x - ship.x) ** 2 + (s.y - ship.y) ** 2 < 18 * 18) damageShip(22);
+    if ((s.x - ship.x) ** 2 + (s.y - ship.y) ** 2 < (6 + shipR) ** 2) damageShip(22);
   }
 
   // critters
   for (let i = critters.length - 1; i >= 0; i--) {
     const c = critters[i]; c.ph += dt;
     if (c.kind === 'friend') {
-      if (c.shy > 0) { c.shy -= dt; c.x += c.vx * dt; c.y += c.vy * 0.5 * dt; }
-      else { c.x += Math.sin(c.ph * 0.8) * 30 * dt; c.y += c.vy * dt; }
-      if (beam && !c.gifted && c.shy <= 0 && Math.hypot(c.x - ship.x, c.y - ship.y) < S.beamRange + 20) {
+      c.x += Math.sin(c.ph * 0.8) * 30 * dt; c.y += c.vy * dt;
+      if (beam && !c.gifted && Math.hypot(c.x - ship.x, c.y - ship.y) < S.beamRange + 20) {
         c.gifted = true; for (let q = 0; q < 6; q++) addPickup(c.x, c.y, 1, 80); floatText(c.x, c.y - 22, '♥ a gift!', c.col); Audio.friend();
       }
-      if (c.y > H + 40 || c.x < -60 || c.x > W + 60) critters.splice(i, 1);
+      if (c.y > H + 40) critters.splice(i, 1);
     } else {
       if (c.flash > 0) c.flash -= dt;
       let best = null, bd = 220;
@@ -446,20 +601,17 @@ function update(dt) {
       c.vx *= 0.97; c.vy = clamp(c.vy * 0.98, -90, 110);
       c.x += c.vx * dt; c.y += c.vy * dt;
       for (let q = pickups.length - 1; q >= 0; q--) { const pk = pickups[q]; if ((pk.x - c.x) ** 2 + (pk.y - c.y) ** 2 < (c.r + 4) ** 2) { c.ate += pk.v; c.r = Math.min(18, c.r + 0.4); pickups.splice(q, 1); } }
-      if ((c.x - ship.x) ** 2 + (c.y - ship.y) ** 2 < (c.r + 12) ** 2) damageShip(10);
+      if ((c.x - ship.x) ** 2 + (c.y - ship.y) ** 2 < (c.r + shipR) ** 2) damageShip(10);
       if (c.y > H + 40) critters.splice(i, 1);
     }
   }
 
-  // particles / text
   for (let i = parts.length - 1; i >= 0; i--) { const q = parts[i]; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 0.96; q.vy *= 0.96; q.life -= dt; if (q.life <= 0) parts.splice(i, 1); }
   for (let i = texts.length - 1; i >= 0; i--) { const t = texts[i]; t.y -= 30 * dt; t.life -= dt; if (t.life <= 0) texts.splice(i, 1); }
 
-  // sector end
   if (run.t >= SECTOR_TIME && run.ending <= 0) { run.ending = 3; toast('Sector clear! Bringing the scrap home…', 2800); }
   if (run.ending > 0) { run.ending -= dt; if (run.ending <= 0) endRun(true); }
 
-  // HUD
   $('hudScrap').textContent = '✦ ' + run.scrap;
   $('hudBar').style.width = (p * 100).toFixed(1) + '%';
 }
@@ -476,16 +628,16 @@ function drawBackground(dt) {
     s.tw += dt * 2;
     ctx.globalAlpha = (0.35 + s.l * 0.22) * (0.75 + 0.25 * Math.sin(s.tw));
     ctx.fillStyle = s.l === 2 ? '#e8fbff' : s.l === 1 ? '#bcd4ff' : '#8a8fd6';
-    const z = 0.6 + s.l * 0.6; ctx.fillRect(s.x * W, s.y * H, z, z);
+    const z = (0.6 + s.l * 0.6) / Z; ctx.fillRect(s.x * W, s.y * H, z, z);
   }
   ctx.globalAlpha = 1;
 }
 
 function drawJunk(j) {
   ctx.save(); ctx.translate(j.x, j.y); ctx.rotate(j.a);
-  const col = j.flash > 0 ? '#ffffff' : j.t.col, r = j.r;
+  const col = j.flash > 0 ? '#ffffff' : j.gold ? '#ffd36d' : j.t.col, r = j.r;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.fillStyle = 'rgba(10,12,30,0.75)';
+  ctx.fillStyle = j.gold ? 'rgba(60,45,5,0.8)' : 'rgba(10,12,30,0.75)';
   ctx.beginPath();
   switch (j.k) {
     case 'rock': {
@@ -531,46 +683,83 @@ function drawJunk(j) {
       ctx.moveTo(r * 0.35, r * 0.18); ctx.lineTo(r * 0.35, r * 0.3); glow(col, 1.2);
       break;
     }
+    case 'hulk': {
+      ctx.arc(0, 0, r * 0.75, 0, TAU); ctx.fill(); glow(col, 2.4);
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.45, 0, TAU);
+      for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; ctx.moveTo(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45); ctx.lineTo(Math.cos(a) * r * 0.75, Math.sin(a) * r * 0.75); }
+      ctx.rect(-r * 1.15, -r * 0.12, r * 0.4, r * 0.24); ctx.rect(r * 0.75, -r * 0.12, r * 0.4, r * 0.24);
+      ctx.rect(-r * 0.15, -r * 1.1, r * 0.3, r * 0.35); glow(col, 1.5);
+      ctx.beginPath(); ctx.moveTo(-r * 0.3, -r * 0.1); ctx.lineTo(-r * 0.05, r * 0.15); ctx.lineTo(r * 0.2, -r * 0.05); glow('#ffffff', 1);
+      break;
+    }
   }
+  ctx.restore();
+  if (j.boss) { // health bar
+    const w = 120, f = Math.max(0, j.hp / j.maxHp);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(j.x - w / 2, j.y - j.r - 22, w, 5);
+    ctx.fillStyle = '#ffb38a'; ctx.fillRect(j.x - w / 2, j.y - j.r - 22, w * f, 5);
+  }
+}
+
+function shipPath(design) {
+  ctx.beginPath();
+  if (design === 'manta') { ctx.moveTo(0, -16); ctx.quadraticCurveTo(8, -4, 18, 6); ctx.quadraticCurveTo(9, 6, 4, 11); ctx.lineTo(0, 8); ctx.lineTo(-4, 11); ctx.quadraticCurveTo(-9, 6, -18, 6); ctx.quadraticCurveTo(-8, -4, 0, -16); }
+  else if (design === 'saucer') { ctx.ellipse(0, 2, 16, 8, 0, 0, TAU); ctx.moveTo(8, -1); ctx.arc(0, -1, 8, 0, Math.PI, true); }
+  else { ctx.moveTo(0, -18); ctx.lineTo(13, 10); ctx.lineTo(5, 7); ctx.lineTo(0, 12); ctx.lineTo(-5, 7); ctx.lineTo(-13, 10); ctx.closePath(); }
+}
+function drawShipBody(x, y, scale, tilt, col, accent, design, flame) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(tilt * 0.4); ctx.scale(scale, scale);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = accent; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.moveTo(-5, 10); ctx.lineTo(0, 10 + flame * 1.6); ctx.lineTo(5, 10); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.moveTo(-2.5, 10); ctx.lineTo(0, 10 + flame * 0.8); ctx.lineTo(2.5, 10); ctx.fill();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.lineJoin = 'round';
+  shipPath(design); ctx.fillStyle = 'rgba(8,20,40,0.9)'; ctx.fill(); glow(col, 2);
+  ctx.beginPath(); ctx.ellipse(0, design === 'saucer' ? -3 : -3, 3, design === 'saucer' ? 3 : 5, 0, 0, TAU); ctx.fillStyle = accent; ctx.fill();
   ctx.restore();
 }
 
 function drawShip(t) {
-  const x = ship.x, y = ship.y;
-  // beam
+  const x = ship.x, y = ship.y, [col, accent] = COLORS[save.equip.color] || COLORS.cyan;
   const beamOn = (!pointer.down || run.ending > 0) && ship.reboot <= 0;
   if (beamOn) {
     const R = S.beamRange;
     const g = ctx.createRadialGradient(x, y, 8, x, y, R);
     g.addColorStop(0, 'rgba(95,243,255,0.16)'); g.addColorStop(1, 'rgba(95,243,255,0)');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(95,243,255,0.25)'; ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(95,243,255,0.25)'; ctx.lineWidth = 1.4;
     for (let i = 0; i < 3; i++) { const f = 1 - ((t * 0.6 + i / 3) % 1); ctx.globalAlpha = 0.5 * (1 - f) + 0.1; ctx.beginPath(); ctx.arc(x, y, 14 + f * (R - 14), 0, TAU); ctx.stroke(); }
     ctx.globalAlpha = 1;
   }
+  // drones
+  for (const d of drones) {
+    const g = ctx.createRadialGradient(d.x, d.y, 2, d.x, d.y, 80); g.addColorStop(0, 'rgba(157,255,138,0.10)'); g.addColorStop(1, 'rgba(157,255,138,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(d.x, d.y, 80, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(d.x, d.y, 6, 0, TAU); ctx.fillStyle = 'rgba(10,30,10,0.9)'; ctx.fill(); glow('#9dff8a', 1.6);
+    ctx.beginPath(); ctx.arc(d.x, d.y, 2, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
+    if (S.droneShield && d.shieldT <= 0) { ctx.beginPath(); ctx.arc(d.x, d.y, 10, 0, TAU); ctx.strokeStyle = 'rgba(157,255,138,0.5)'; ctx.lineWidth = 1; ctx.stroke(); }
+  }
+  if (wing) drawShipBody(wing.x, wing.y, 0.7, ship.tilt, col, accent, 'dart', 6 + Math.sin(t * 40) * 2);
+  if (pet) drawPet(t);
   if (ship.inv > 0 && Math.floor(t * 12) % 2 === 0 && ship.reboot <= 0) return;
-  ctx.save(); ctx.translate(x, y); ctx.rotate(ship.tilt * 0.4);
-  // flame
   const fl = 8 + Math.sin(t * 40) * 2 + (pointer.down ? 4 : 0);
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.fillStyle = 'rgba(255,106,213,0.55)'; ctx.beginPath(); ctx.moveTo(-5, 10); ctx.lineTo(0, 10 + fl * 1.6); ctx.lineTo(5, 10); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.moveTo(-2.5, 10); ctx.lineTo(0, 10 + fl * 0.8); ctx.lineTo(2.5, 10); ctx.fill();
-  ctx.globalCompositeOperation = 'source-over';
-  const col = ship.reboot > 0 ? '#ffc66d' : '#5ff3ff';
-  ctx.lineJoin = 'round';
-  ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(13, 10); ctx.lineTo(5, 7); ctx.lineTo(0, 12); ctx.lineTo(-5, 7); ctx.lineTo(-13, 10); ctx.closePath();
-  ctx.fillStyle = 'rgba(8,20,40,0.9)'; ctx.fill(); glow(col, 2);
-  ctx.beginPath(); ctx.ellipse(0, -3, 3, 5, 0, 0, TAU); ctx.fillStyle = '#ff6ad5'; ctx.fill();
-  ctx.restore();
-  // shield ring
-  const sf = ship.shield / S.maxShield;
+  drawShipBody(x, y, 1.2 * S.hull, ship.tilt, ship.reboot > 0 ? '#ffc66d' : col, accent, save.equip.design, fl);
+  const sf = ship.shield / S.maxShield, R = 26 * S.hull;
   if (ship.reboot > 0) {
     ctx.strokeStyle = 'rgba(255,198,109,0.6)'; ctx.lineWidth = 2; ctx.setLineDash([3, 5]);
-    ctx.beginPath(); ctx.arc(x, y, 24, t * 3, t * 3 + TAU * (1 - ship.reboot / 2)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x, y, R, t * 3, t * 3 + TAU * (1 - ship.reboot / 2)); ctx.stroke(); ctx.setLineDash([]);
   } else if (sf < 0.999 || ship.hitT > 0) {
     ctx.strokeStyle = sf > 0.35 ? 'rgba(95,243,255,0.55)' : 'rgba(255,106,213,0.75)'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(x, y, 24, -Math.PI / 2, -Math.PI / 2 + TAU * sf); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + TAU * sf); ctx.stroke();
   }
+}
+function drawPet(t) {
+  const p = pet; ctx.save(); ctx.translate(p.x, p.y); const col = '#ffc66d';
+  ctx.beginPath(); ctx.arc(0, 0, 8, 0, TAU); ctx.moveTo(-7, -4); ctx.lineTo(-6, -12); ctx.lineTo(-2, -7); ctx.moveTo(7, -4); ctx.lineTo(6, -12); ctx.lineTo(2, -7);
+  ctx.fillStyle = 'rgba(40,25,5,0.85)'; ctx.fill(); glow(col, 1.4);
+  ctx.beginPath(); ctx.moveTo(-6, 6); ctx.quadraticCurveTo(-14, 10 + Math.sin(t * 6) * 4, -16, 2); glow(col, 1.2);
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-3, -1, 1.5, 0, TAU); ctx.arc(3, -1, 1.5, 0, TAU); ctx.fill();
+  ctx.restore();
 }
 
 function drawPest(c, t) {
@@ -593,94 +782,144 @@ function drawFriend(c, t) {
   ctx.beginPath();
   for (let i = -2; i <= 2; i++) { const bx = i * r * 0.42; ctx.moveTo(bx, r * 0.2); ctx.quadraticCurveTo(bx + Math.sin(t * 3 + i) * 5, r * 0.8, bx + Math.sin(t * 3 + i + 1) * 4, r * 1.3); }
   glow(col, 1.2);
-  const blink = (Math.sin(c.ph * 1.7) > 0.96);
   ctx.fillStyle = '#fff';
-  if (c.shy > 0) { ctx.beginPath(); ctx.moveTo(-r * 0.55, -r * 0.35); ctx.lineTo(-r * 0.2, -r * 0.25); ctx.moveTo(r * 0.55, -r * 0.35); ctx.lineTo(r * 0.2, -r * 0.25); glow('#fff', 1.2); }
-  else if (!blink) { ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.3, 2.4, 0, TAU); ctx.arc(r * 0.35, -r * 0.3, 2.4, 0, TAU); ctx.fill(); }
+  if (Math.sin(c.ph * 1.7) <= 0.96) { ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.3, 2.4, 0, TAU); ctx.arc(r * 0.35, -r * 0.3, 2.4, 0, TAU); ctx.fill(); }
   ctx.restore();
 }
 
 function draw(dt, t) {
   drawBackground(dt);
   if (!run) return;
-  // train telegraphs
   for (const tr of trains) {
     if (tr.warn <= 0) continue;
     const a = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(t * 10)) * (1 - tr.warn / 2.4 * 0.5);
-    ctx.save(); ctx.strokeStyle = '#ff6ad5'; ctx.globalAlpha = a; ctx.lineWidth = 3; ctx.setLineDash([2, 12]); ctx.lineDashOffset = -t * 60; ctx.lineCap = 'round';
+    ctx.save(); ctx.strokeStyle = '#ff6ad5'; ctx.globalAlpha = a; ctx.lineWidth = 3.5; ctx.setLineDash([2, 13]); ctx.lineDashOffset = -t * 60; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(tr.x1, tr.y1); ctx.lineTo(tr.x2, tr.y2); ctx.stroke();
-    ctx.globalAlpha = a * 0.25; ctx.lineWidth = 16; ctx.setLineDash([]); ctx.stroke();
-    // entry arrow
-    const ex = clamp(tr.x1, 14, W - 14), ey = tr.y1 + (ex - tr.x1) * tr.dy / (tr.dx || 1);
+    ctx.globalAlpha = a * 0.25; ctx.lineWidth = 18; ctx.setLineDash([]); ctx.stroke();
+    const ex = clamp(tr.x1, 16, W - 16), ey = tr.y1 + (ex - tr.x1) * tr.dy / (tr.dx || 1);
     ctx.globalAlpha = 0.9; ctx.fillStyle = '#ff6ad5'; ctx.translate(ex, ey); ctx.rotate(Math.atan2(tr.dy, tr.dx));
-    ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-6, -7); ctx.lineTo(-6, 7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(-7, -8); ctx.lineTo(-7, 8); ctx.fill();
     ctx.restore();
   }
-  // pickups
   ctx.globalCompositeOperation = 'lighter';
   for (const q of pickups) {
-    const s = 3.5 + Math.min(q.v, 6) * 0.5, fade = q.life < 3 ? (Math.sin(q.life * 12) > 0 ? 1 : 0.3) : 1;
-    ctx.globalAlpha = 0.3 * fade; ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(q.x, q.y, s * 1.9, 0, TAU); ctx.fill();
-    ctx.globalAlpha = fade; ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.ph);
-    ctx.beginPath(); ctx.moveTo(0, -s); ctx.lineTo(s * 0.7, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.7, 0); ctx.closePath(); ctx.fillStyle = '#ffd98a'; ctx.fill(); ctx.restore();
+    const fade = q.life < 3 ? (Math.sin(q.life * 12) > 0 ? 1 : 0.3) : 1;
+    const s = q.kind ? 6.5 : 3.5 + Math.min(q.v, 6) * 0.5;
+    const [halo, core] = q.kind === 'gem' ? ['#3fb6ff', '#bfeaff'] : q.kind === 'gold' ? ['#ffcc33', '#fff3b0'] : ['#ffb347', '#ffd98a'];
+    ctx.globalAlpha = 0.3 * fade; ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(q.x, q.y, s * 1.9, 0, TAU); ctx.fill();
+    ctx.globalAlpha = fade; ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.kind === 'gem' ? 0 : q.ph); ctx.beginPath();
+    if (q.kind === 'gold') { for (let i = 0; i < 10; i++) { const a = i / 10 * TAU - Math.PI / 2, rr = i % 2 ? s * 0.45 : s; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } }
+    else if (q.kind === 'gem') { ctx.moveTo(-s * 0.8, -s * 0.3); ctx.lineTo(-s * 0.4, -s * 0.8); ctx.lineTo(s * 0.4, -s * 0.8); ctx.lineTo(s * 0.8, -s * 0.3); ctx.lineTo(0, s); }
+    else { ctx.moveTo(0, -s); ctx.lineTo(s * 0.7, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.7, 0); }
+    ctx.closePath(); ctx.fillStyle = core; ctx.fill(); ctx.restore();
   }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   for (const j of junk) drawJunk(j);
   for (const c of critters) c.kind === 'friend' ? drawFriend(c, t) : drawPest(c, t);
-  // starlink sats
   for (const s of sats) {
     ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(Math.atan2(s.vy, s.vx));
-    ctx.beginPath(); ctx.rect(-2.5, -2.5, 5, 5); ctx.moveTo(-3, 0); ctx.lineTo(-3, 0); ctx.rect(-4, -9, 2.5, 6); ctx.rect(-4, 3, 2.5, 6);
+    ctx.beginPath(); ctx.rect(-2.5, -2.5, 5, 5); ctx.rect(-4, -9, 2.5, 6); ctx.rect(-4, 3, 2.5, 6);
     ctx.fillStyle = '#1a1030'; ctx.fill(); glow('#ff6ad5', 1.3);
     if (Math.sin(s.blink * 6) > 0.3) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(3.5, 0, 1.6, 0, TAU); ctx.fill(); }
     ctx.restore();
   }
-  // bullets
   ctx.globalCompositeOperation = 'lighter';
   ctx.lineCap = 'round';
   for (const b of bullets) {
-    const n = Math.hypot(b.vx, b.vy), ux = b.vx / n, uy = b.vy / n;
-    ctx.strokeStyle = 'rgba(95,243,255,0.35)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - ux * 14, b.y - uy * 14); ctx.stroke();
-    ctx.strokeStyle = '#e8ffff'; ctx.lineWidth = 2; ctx.stroke();
+    const vx = b.kind === 'wave' ? Math.cos(b.t * 11 + b.ph) * 38 * 11 : b.vx, vy = b.vy;
+    const n = Math.hypot(vx, vy) || 1, ux = vx / n, uy = vy / n, L = b.kind === 'lance' ? 26 : b.kind === 'home' ? 9 : 14;
+    const c = b.kind === 'home' ? 'rgba(255,198,109,0.4)' : b.kind === 'lance' ? 'rgba(255,106,213,0.4)' : b.kind === 'wing' ? 'rgba(157,255,138,0.35)' : 'rgba(95,243,255,0.35)';
+    ctx.strokeStyle = c; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - ux * L, b.y - uy * L); ctx.stroke();
+    ctx.strokeStyle = '#f2ffff'; ctx.lineWidth = 2.4; ctx.stroke();
   }
   for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, p.sz, 0, TAU); ctx.fill(); }
   ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   drawShip(t);
-  ctx.textAlign = 'center'; ctx.font = '600 14px ui-rounded, system-ui, sans-serif';
+  ctx.textAlign = 'center'; ctx.font = '600 ' + Math.round(15 / Z) + 'px ui-rounded, system-ui, sans-serif';
   for (const tx of texts) { ctx.globalAlpha = Math.min(1, tx.life); ctx.fillStyle = tx.col; ctx.fillText(tx.s, tx.x, tx.y); }
   ctx.globalAlpha = 1;
 }
 
 // ---------- flow ----------
-function showOverlay(id) { ['title', 'pause', 'hangar'].forEach(o => $(o).classList.toggle('show', o === id)); }
+function showOverlay(id) { ['title', 'pause', 'hangar', 'jump'].forEach(o => $(o).classList.toggle('show', o === id)); }
 function startRun() {
   Audio.init(); newRun(); state = 'play'; showOverlay(null); $('hud').style.display = 'flex';
   if (!save.seenHelp) { toast('Drag to fly · touching fires · lift your thumb to pull in scrap', 5000); save.seenHelp = true; persist(); }
-  else toast('Sector ' + save.sector, 1800);
+  else toast('Sector ' + save.sector + (run.zen ? ' · zen' : '') + ' · ' + PATTERNS[S.pattern].name, 2000);
 }
 function endRun(complete) {
-  const got = run.scrap;
+  const got = Math.round(run.scrap * scrapMult());
   save.scrap += got; save.best = Math.max(save.best, got);
   if (complete) save.sector++;
   persist();
-  $('summary').innerHTML = (complete ? 'Sector ' + run.sector + ' clear! ' : 'Back early. ') + 'Junk cleared: ' + run.cleared + ' · Scrap banked: ✦ ' + got;
+  $('summary').innerHTML = (complete ? 'Sector ' + run.sector + ' clear! ' : 'Back early. ') + 'Junk cleared: ' + run.cleared + ' · Scrap banked: ✦ ' + got + (scrapMult() !== 1 ? ' (×' + scrapMult().toFixed(2) + ')' : '');
   state = 'hangar'; $('hud').style.display = 'none'; pointer.down = false; renderHangar(); showOverlay('hangar');
 }
 function pause() { if (state !== 'play') return; state = 'paused'; pointer.down = false; $('pauseInfo').textContent = 'Carrying ✦ ' + run.scrap + ' · ' + Math.max(0, Math.ceil(SECTOR_TIME - run.t)) + 's left in sector'; showOverlay('pause'); }
 function resume() { if (state !== 'paused') return; state = 'play'; showOverlay(null); last = performance.now(); }
+function chip(label, on, fn, cls = '') { const b = document.createElement('button'); b.className = 'chip ' + cls + (on ? ' on' : ''); b.textContent = label; if (fn) b.onclick = () => { Audio.init(); fn(); renderHangar(); }; else b.disabled = true; return b; }
 function renderHangar() {
   $('bank').textContent = '✦ ' + save.scrap;
-  $('btnLaunch').textContent = 'Launch Sector ' + save.sector;
+  $('orbitInfo').textContent = save.orbit ? 'Orbit ' + (save.orbit + 1) + ' · permanent scrap bonus +' + Math.round(save.orbit * 15) + '%' : '';
+  $('btnLaunch').textContent = 'Launch Sector ' + save.sector + (save.zen ? ' (zen)' : '');
+  const js = $('jumpSlot'); js.innerHTML = '';
+  if (canJump()) {
+    const c = document.createElement('div'); c.className = 'jumpcard';
+    c.innerHTML = `<div class="n">✧ Jump to a new orbit</div><div class="d">${allMaxed() ? 'Your ship is fully upgraded.' : 'You\'ve reached Sector ' + save.sector + '.'} Trade it all for a permanent reward and start fresh.</div>`;
+    const b = document.createElement('button'); b.textContent = 'Choose a reward'; b.onclick = openJump; c.appendChild(b); js.appendChild(c);
+  }
   const box = $('upgrades'); box.innerHTML = '';
   UPG.forEach(u => {
     const l = save.up[u.id], maxed = l >= u.max, c = cost(u);
     const el = document.createElement('div'); el.className = 'up';
-    el.innerHTML = `<div class="t"><div class="n">${u.name}</div><div class="d">${u.desc}</div><div class="pips">${Array.from({ length: u.max }, (_, i) => `<b class="${i < l ? 'on' : ''}"></b>`).join('')}</div></div>`;
+    el.innerHTML = `<div class="t"><div class="n">${u.name}</div><div class="d">${u.desc(l)}</div><div class="pips">${Array.from({ length: u.max }, (_, i) => `<b class="${i < l ? 'on' : ''}" style="${u.max > 6 ? 'width:9px' : ''}"></b>`).join('')}</div></div>`;
     const b = document.createElement('button'); b.className = 'buy';
     b.textContent = maxed ? 'MAX' : '✦ ' + c; b.disabled = maxed || save.scrap < c;
-    b.onclick = () => { if (save.scrap >= c && !maxed) { save.scrap -= c; save.up[u.id]++; persist(); Audio.init(); Audio.buy(); renderHangar(); } };
+    b.onclick = () => { if (save.scrap >= c && !maxed) { save.scrap -= c; save.up[u.id]++; if (u.id === 'pattern') save.equip.pattern = -1; persist(); Audio.init(); Audio.buy(); renderHangar(); } };
     el.appendChild(b); box.appendChild(el);
   });
+  const pc = $('patChips'); pc.innerHTML = ''; const ap = activePattern();
+  for (let i = 0; i <= lv('pattern'); i++) pc.appendChild(chip((i + 1) + ' ' + PATTERNS[i].name, ap === i, () => { save.equip.pattern = i === lv('pattern') ? -1 : i; persist(); }));
+  if (has('prism')) pc.appendChild(chip('★ Prism lance', ap === 10, () => { save.equip.pattern = 10; persist(); }));
+  const lc = $('lookChips'); lc.innerHTML = '';
+  const showLooks = has('design') || has('color');
+  $('looksHead').style.display = lc.style.display = showLooks ? '' : 'none';
+  if (has('design')) Object.entries(DESIGNS).forEach(([k, n]) => lc.appendChild(chip(n, save.equip.design === k, () => { save.equip.design = k; persist(); })));
+  if (has('color')) Object.keys(COLORS).forEach(k => { const b = chip('●  ' + k[0].toUpperCase() + k.slice(1), save.equip.color === k, () => { save.equip.color = k; persist(); }); b.style.color = COLORS[k][0]; lc.appendChild(b); });
+  const rc = $('rewChips'); rc.innerHTML = '';
+  $('rewHead').style.display = rc.style.display = save.rewards.length ? '' : 'none';
+  save.rewards.forEach(id => { const r = REWARDS.find(q => q.id === id); if (r) rc.appendChild(chip(r.ico + ' ' + r.name, false, null, 'badge')); });
+  const mc = $('modeChips'); mc.innerHTML = '';
+  mc.appendChild(chip('Normal', !save.zen, () => { save.zen = false; persist(); }));
+  mc.appendChild(chip('Zen: no hazards, ×0.7 scrap', save.zen, () => { save.zen = true; persist(); }));
+}
+let pick = null;
+function openJump() {
+  pick = null; state = 'jump'; const g = $('rewardGrid'); g.innerHTML = '';
+  const left = REWARDS.filter(r => !has(r.id));
+  REWARDS.forEach(r => {
+    const owned = has(r.id), el = document.createElement('div'); el.className = 'up reward' + (owned ? ' owned' : '');
+    el.innerHTML = `<div class="ico">${r.ico}</div><div class="t"><div class="n">${r.name}${owned ? ' · owned' : ''}</div><div class="d">${r.desc}</div></div>`;
+    if (!owned) el.onclick = () => { pick = r.id; [...g.children].forEach(c => c.classList.remove('sel')); el.classList.add('sel'); syncJumpBtn(); };
+    g.appendChild(el);
+  });
+  if (!left.length) pick = 'none';
+  syncJumpBtn(); showOverlay('jump'); $('jump').scrollTop = 0;
+}
+function syncJumpBtn() {
+  const b = $('btnDoJump');
+  b.disabled = !pick; b.style.opacity = pick ? 1 : 0.5;
+  b.textContent = pick === 'none' ? 'Jump (+15% scrap bonus)' : pick ? 'Jump to a new orbit' : 'Pick a reward';
+}
+function doJump(id) {
+  if (!id || !canJump()) return false;
+  if (id !== 'none' && !has(id)) save.rewards.push(id);
+  save.orbit++; save.scrap = 0; save.sector = 1; UPG.forEach(u => save.up[u.id] = 0); save.equip.pattern = -1;
+  persist(); Audio.init(); Audio.jump();
+  const r = REWARDS.find(q => q.id === id);
+  $('summary').textContent = 'Welcome to orbit ' + (save.orbit + 1) + '!' + (r ? ' Unlocked: ' + r.ico + ' ' + r.name : '');
+  state = 'hangar'; renderHangar(); showOverlay('hangar'); $('hangar').scrollTop = 0;
+  return true;
 }
 
 // ---------- input ----------
@@ -694,12 +933,11 @@ function onDown(e) {
 }
 function onMove(e) {
   if (!pointer.down || e.pointerId !== pointer.id || state !== 'play') return;
-  const sens = 1.25;
+  const sens = 1.25 / Z; // screen px -> world units
   target.x = clamp(pointer.tx + (e.clientX - pointer.sx) * sens, 16, W - 16);
-  target.y = clamp(pointer.ty + (e.clientY - pointer.sy) * sens, H * 0.25, H - 36);
-  // re-anchor if clamped so reversing direction responds instantly
+  target.y = clamp(pointer.ty + (e.clientY - pointer.sy) * sens, H * 0.25, H - 40);
   if (target.x <= 16 || target.x >= W - 16) { pointer.sx = e.clientX; pointer.tx = target.x; }
-  if (target.y <= H * 0.25 || target.y >= H - 36) { pointer.sy = e.clientY; pointer.ty = target.y; }
+  if (target.y <= H * 0.25 || target.y >= H - 40) { pointer.sy = e.clientY; pointer.ty = target.y; }
   e.preventDefault();
 }
 function onUp(e) { if (e.pointerId !== pointer.id) return; pointer.down = false; pointer.id = null; }
@@ -720,6 +958,8 @@ $('btnHangar').onclick = () => { Audio.init(); renderHangar(); $('summary').text
 $('btnPause').onclick = pause;
 $('btnResume').onclick = resume;
 $('btnLeave').onclick = () => { state = 'play'; endRun(false); };
+$('btnDoJump').onclick = () => doJump(pick);
+$('btnNoJump').onclick = () => { state = 'hangar'; showOverlay('hangar'); };
 const syncMute = () => { $('btnMute').textContent = save.muted ? '✕' : '♪'; $('btnMute').style.opacity = save.muted ? 0.5 : 1; };
 $('btnMute').onclick = () => { save.muted = !save.muted; persist(); Audio.init(); Audio.setMuted(save.muted); syncMute(); };
 syncMute();
@@ -729,14 +969,15 @@ let last = performance.now(), time = 0;
 function frame(now) {
   const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
   if (state === 'play') { time += dt; update(dt); }
-  draw(state === 'play' || state === 'title' || state === 'hangar' ? dt : 0, time + (state === 'play' ? 0 : now / 1000));
+  draw(state === 'paused' ? 0 : dt, time + (state === 'play' ? 0 : now / 1000));
   Audio.tick();
   requestAnimationFrame(frame);
 }
 resize();
 requestAnimationFrame(frame);
 window.__game = { get state() { return state; }, get run() { return run; }, get ship() { return ship; }, get junk() { return junk; }, get save() { return save; },
-  set time(v) { if (run) run.t = v; }, spawnTrain: () => spawnTrain(), spawnCritter: k => spawnCritter(k) };
+  get bullets() { return bullets; }, get critters() { return critters; }, get zoom() { return Z; },
+  set time(v) { if (run) run.t = v; }, spawnTrain: () => spawnTrain(), spawnCritter: k => spawnCritter(k), spawnBoss: () => spawnBoss(), doJump };
 })();
 </script>
 </body>
